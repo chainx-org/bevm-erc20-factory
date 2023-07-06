@@ -3,6 +3,7 @@ package erc20Factory
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -15,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/joho/godotenv"
 )
 
 type ERC20Factory struct {
@@ -23,18 +25,33 @@ type ERC20Factory struct {
 	Client      *ethclient.Client
 }
 
-func GetPrivateKeyFromEnv() (*ecdsa.PrivateKey, error) {
+func GetPrivateKeyFromEnv() (*ecdsa.PrivateKey, string, error) {
+	if _, err := os.Stat(".env"); err == nil {
+		// .env exists, load it
+		err := godotenv.Load()
+		if err != nil {
+			log.Fatalf("Error loading .env file")
+		}
+	}
+
 	privateKeyHex := os.Getenv("PRIVATE_KEY")
 	if privateKeyHex == "" {
-		return nil, fmt.Errorf("PRIVATE_KEY environment variable not set")
+		return nil, "", fmt.Errorf("PRIVATE_KEY environment variable not set")
 	}
 
 	privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert private key: %v", err)
+		return nil, "", fmt.Errorf("failed to convert private key: %v", err)
+	}
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, "", errors.New("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
 	}
 
-	return privateKey, nil
+	address := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	return privateKey, address.Hex(), nil
 }
 
 func NewERC20Factory(ipcPath string, contractAbi string, factoryAddress string) (*ERC20Factory, error) {
@@ -57,10 +74,9 @@ func NewERC20Factory(ipcPath string, contractAbi string, factoryAddress string) 
 
 func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8, owner, admin common.Address) (*common.Address, error) {
 	// Assuming you have the private key of the owner who can call the `create` function
-	privateKey, err := GetPrivateKeyFromEnv()
-	if err != nil {
-		return nil, err
-	}
+	privateKey, address, err := GetPrivateKeyFromEnv()
+
+	fmt.Printf("User Address: %s\n", address)
 
 	if err != nil {
 		return nil, err
@@ -70,6 +86,8 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	if err != nil {
 		log.Fatalf("Failed to get the nonce: %v", err)
 	}
+	nonce++ // Increment nonce manually
+	fmt.Printf("Nonce: %d\n", nonce)
 
 	gasPrice, err := f.Client.SuggestGasPrice(context.Background())
 	if err != nil {
@@ -102,6 +120,7 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	if err != nil {
 		log.Fatalf("Failed to get chain ID: %v", err)
 	}
+	fmt.Printf("Chain ID: %s\n", chainID.String())
 
 	signer := types.NewEIP155Signer(chainID)
 	sighash := signer.Hash(tx)
@@ -111,10 +130,6 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	}
 
 	signedTx, err := tx.WithSignature(signer, signature)
-	if err != nil {
-		return nil, err
-	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -131,5 +146,7 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 
 	// Assuming the new contract address is logged in the first log
 	newContractAddress := txReceipt.Logs[0].Address
+	fmt.Printf("New contract address: %s\n", newContractAddress.Hex())
+
 	return &newContractAddress, nil
 }

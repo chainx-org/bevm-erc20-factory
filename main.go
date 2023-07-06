@@ -24,12 +24,12 @@ func main() {
 	}
 
 	// Replace with your own values
-	name := "MyToken"
-	symbol := "MTK"
-	protocol := "MyProtocol"
+	name := "ABCD"
+	symbol := "ABCD"
+	protocol := "brc-20"
 	decimals := uint8(18)
-	owner := common.HexToAddress("0xYourOwnerAddress")
-	admin := common.HexToAddress("0xYourAdminAddress")
+	owner := common.HexToAddress("0xffBFBCC6d20a0a90CBDEB1DA52BED04Bb9B37022")
+	admin := common.HexToAddress("0xffBFBCC6d20a0a90CBDEB1DA52BED04Bb9B37022")
 
 	// Call CreateERC20
 	newContractAddress, err := factory.CreateERC20(name, symbol, protocol, decimals, owner, admin)
