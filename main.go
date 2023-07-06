@@ -1,7 +1,8 @@
 package main
 
 import (
-	"bevm-erc20-factory/factory"
+	"bevm-erc20-factory/config"
+	"bevm-erc20-factory/erc20Factory"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -11,13 +12,13 @@ import (
 
 func main() {
 	// Read ABI from file
-	abi, err := ioutil.ReadFile("../abis/BitcoinAssetsErc20Factory.json")
+	abi, err := ioutil.ReadFile("./abis/BitcoinAssetsErc20Factory.json")
 	if err != nil {
 		log.Fatalf("Failed to read contract ABI: %v", err)
 	}
 
 	// Instantiate the factory
-	factory, err := factory.NewERC20Factory("./abis/BitcoinAssetsErc20Factory.json", string(abi), "0xYourFactoryContractAddress")
+	factory, err := erc20Factory.NewERC20Factory(config.BEVMTestnet.RpcUrl, string(abi), config.BEVMTestnet.FactoryContractAddress)
 	if err != nil {
 		log.Fatalf("Failed to create ERC20 factory: %v", err)
 	}

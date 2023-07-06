@@ -1,4 +1,4 @@
-package factory
+package erc20Factory
 
 import (
 	"context"
