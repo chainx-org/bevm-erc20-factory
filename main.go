@@ -28,6 +28,7 @@ func main() {
 	symbol := "ABCD"
 	protocol := "brc-20"
 	decimals := uint8(18)
+	// hot wallet address, owner can change admin
 	owner := common.HexToAddress("0xffBFBCC6d20a0a90CBDEB1DA52BED04Bb9B37022")
 	admin := common.HexToAddress("0xffBFBCC6d20a0a90CBDEB1DA52BED04Bb9B37022")
 

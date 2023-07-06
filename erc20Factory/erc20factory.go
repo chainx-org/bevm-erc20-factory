@@ -9,7 +9,9 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -25,7 +27,7 @@ type ERC20Factory struct {
 	Client      *ethclient.Client
 }
 
-func GetPrivateKeyFromEnv() (*ecdsa.PrivateKey, string, error) {
+func GetPrivateKeyFromEnv() (*ecdsa.PrivateKey, common.Address, error) {
 	if _, err := os.Stat(".env"); err == nil {
 		// .env exists, load it
 		err := godotenv.Load()
@@ -36,22 +38,38 @@ func GetPrivateKeyFromEnv() (*ecdsa.PrivateKey, string, error) {
 
 	privateKeyHex := os.Getenv("PRIVATE_KEY")
 	if privateKeyHex == "" {
-		return nil, "", fmt.Errorf("PRIVATE_KEY environment variable not set")
+		return nil, common.Address{}, fmt.Errorf("PRIVATE_KEY environment variable not set")
 	}
 
 	privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to convert private key: %v", err)
+		return nil, common.Address{}, fmt.Errorf("failed to convert private key: %v", err)
 	}
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, "", errors.New("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+		return nil, common.Address{}, errors.New("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
 	}
 
-	address := crypto.PubkeyToAddress(*publicKeyECDSA)
+	addressHex := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	return privateKey, address.Hex(), nil
+	return privateKey, addressHex, nil
+}
+
+func (f *ERC20Factory) EstimateGas(input []byte, from, to common.Address, gasPrice *big.Int) (uint64, error) {
+	callMsg := ethereum.CallMsg{
+		From:     from,
+		To:       &to,
+		GasPrice: gasPrice,
+		Data:     input,
+	}
+
+	estimatedGas, err := f.Client.EstimateGas(context.Background(), callMsg)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to estimate gas: %v", err)
+	}
+
+	return estimatedGas, nil
 }
 
 func NewERC20Factory(ipcPath string, contractAbi string, factoryAddress string) (*ERC20Factory, error) {
@@ -74,20 +92,17 @@ func NewERC20Factory(ipcPath string, contractAbi string, factoryAddress string) 
 
 func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8, owner, admin common.Address) (*common.Address, error) {
 	// Assuming you have the private key of the owner who can call the `create` function
-	privateKey, address, err := GetPrivateKeyFromEnv()
-
-	fmt.Printf("User Address: %s\n", address)
+	privateKey, addressHex, err := GetPrivateKeyFromEnv()
 
 	if err != nil {
 		return nil, err
 	}
 
-	nonce, err := f.Client.PendingNonceAt(context.Background(), owner)
+	nonce, err := f.Client.PendingNonceAt(context.Background(), addressHex)
+
 	if err != nil {
 		log.Fatalf("Failed to get the nonce: %v", err)
 	}
-	nonce++ // Increment nonce manually
-	fmt.Printf("Nonce: %d\n", nonce)
 
 	gasPrice, err := f.Client.SuggestGasPrice(context.Background())
 	if err != nil {
@@ -96,8 +111,7 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 
 	auth := bind.NewKeyedTransactor(privateKey)
 	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0)     // in wei
-	auth.GasLimit = uint64(300000) // in units
+	auth.Value = big.NewInt(0) // in wei
 	auth.GasPrice = gasPrice
 
 	input, err := f.ContractABI.Pack(
@@ -112,6 +126,13 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	if err != nil {
 		return nil, err
 	}
+	estimatedGas, err := f.EstimateGas(input, addressHex, f.FactoryAddr, gasPrice)
+	if err != nil {
+		log.Printf("Failed to estimate gas: %v, fallback to default gas limit", err)
+		estimatedGas = uint64(2200000) // Fallback to default gas limit if estimate failed
+	}
+
+	auth.GasLimit = estimatedGas
 
 	tx := types.NewTransaction(nonce, f.FactoryAddr, big.NewInt(0), auth.GasLimit, auth.GasPrice, input)
 
@@ -120,7 +141,8 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	if err != nil {
 		log.Fatalf("Failed to get chain ID: %v", err)
 	}
-	fmt.Printf("Chain ID: %s\n", chainID.String())
+
+	fmt.Printf("User Address: %s, Nonce: %d, Chain ID: %s \n", addressHex.Hex(), nonce, chainID.String())
 
 	signer := types.NewEIP155Signer(chainID)
 	sighash := signer.Hash(tx)
@@ -138,15 +160,29 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("Signed Tx Hash: %s\n", signedTx.Hash())
 
-	txReceipt, err := f.Client.TransactionReceipt(context.Background(), signedTx.Hash())
-	if err != nil {
-		return nil, err
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Set your desired timeout duration
+	defer cancel()
+
+	var txReceipt *types.Receipt
+	for txReceipt == nil {
+		txReceipt, err = f.Client.TransactionReceipt(ctx, signedTx.Hash())
+		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				// The wait timed out
+				return nil, fmt.Errorf("transaction receipt was not found within the specified time")
+			} else if err.Error() != "not found" {
+				return nil, err
+			}
+		}
+		time.Sleep(time.Second * 5)
 	}
 
 	// Assuming the new contract address is logged in the first log
-	newContractAddress := txReceipt.Logs[0].Address
-	fmt.Printf("New contract address: %s\n", newContractAddress.Hex())
+	logData := txReceipt.Logs[2].Data
+	contractAddressHex := common.Bytes2Hex(logData)               // convert the hex data to bytes
+	newContractAddress := common.HexToAddress(contractAddressHex) // convert the bytes to an Address
 
 	return &newContractAddress, nil
 }
