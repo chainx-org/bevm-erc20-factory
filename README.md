@@ -6,7 +6,7 @@
 First, you need to install this library in your project. If you're using Go Modules, you can run:
 
 ```
-go get github.com/yourusername/bevm-erc20-factory
+go get github.com/chainx-org/bevm-erc20-factory
 ```
 
 ## Configuration
