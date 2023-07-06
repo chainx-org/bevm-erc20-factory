@@ -1,13 +1,12 @@
 package main
 
 import (
+	"bevm-erc20-factory/factory"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"os"
 
 	"github.com/ethereum/go-ethereum/common"
-	"./erc20factory"
 )
 
 func main() {
@@ -18,7 +17,7 @@ func main() {
 	}
 
 	// Instantiate the factory
-	factory, err := erc20factory.NewERC20Factory("/path/to/ipc", string(abi), "0xYourFactoryContractAddress")
+	factory, err := factory.NewERC20Factory("./abis/BitcoinAssetsErc20Factory.json", string(abi), "0xYourFactoryContractAddress")
 	if err != nil {
 		log.Fatalf("Failed to create ERC20 factory: %v", err)
 	}
@@ -39,4 +38,3 @@ func main() {
 
 	fmt.Printf("New contract address: %s\n", newContractAddress.Hex())
 }
-

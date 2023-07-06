@@ -1,20 +1,40 @@
-package erc20factory
+package factory
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type ERC20Factory struct {
 	ContractABI abi.ABI
 	FactoryAddr common.Address
 	Client      *ethclient.Client
+}
+
+func GetPrivateKeyFromEnv() (*ecdsa.PrivateKey, error) {
+	privateKeyHex := os.Getenv("PRIVATE_KEY")
+	if privateKeyHex == "" {
+		return nil, fmt.Errorf("PRIVATE_KEY environment variable not set")
+	}
+
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert private key: %v", err)
+	}
+
+	return privateKey, nil
 }
 
 func NewERC20Factory(ipcPath string, contractAbi string, factoryAddress string) (*ERC20Factory, error) {
@@ -37,7 +57,11 @@ func NewERC20Factory(ipcPath string, contractAbi string, factoryAddress string) 
 
 func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8, owner, admin common.Address) (*common.Address, error) {
 	// Assuming you have the private key of the owner who can call the `create` function
-	privateKey, err := getPrivateKey() // You need to implement this function yourself
+	privateKey, err := GetPrivateKeyFromEnv()
+	if err != nil {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +95,26 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 		return nil, err
 	}
 
-	rawTx := types.NewTransaction(nonce, f.FactoryAddr, big.NewInt(0), auth.GasLimit, auth.GasPrice, input)
-	signedTx, err := auth.Signer(types.HomesteadSigner{}, auth.From, rawTx)
+	tx := types.NewTransaction(nonce, f.FactoryAddr, big.NewInt(0), auth.GasLimit, auth.GasPrice, input)
+
+	// Get chain ID from the Ethereum client
+	chainID, err := f.Client.ChainID(context.Background())
+	if err != nil {
+		log.Fatalf("Failed to get chain ID: %v", err)
+	}
+
+	signer := types.NewEIP155Signer(chainID)
+	sighash := signer.Hash(tx)
+	signature, err := crypto.Sign(sighash[:], privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	signedTx, err := tx.WithSignature(signer, signature)
+	if err != nil {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -91,4 +133,3 @@ func (f *ERC20Factory) CreateERC20(name, symbol, protocol string, decimals uint8
 	newContractAddress := txReceipt.Logs[0].Address
 	return &newContractAddress, nil
 }
-
