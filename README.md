@@ -54,9 +54,9 @@ if err != nil {
 Now, you can use this instance to create new ERC20 tokens:
 
 ```
-name := "MyToken"
-symbol := "MTK"
-protocol := "MyProtocol"
+name := "ABCD"
+symbol := "ABCD"
+protocol := "brc-20"
 decimals := uint8(18)
 owner := common.HexToAddress("<owner address here>")
 admin := common.HexToAddress("<admin address here>")
